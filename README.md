@@ -52,5 +52,5 @@ The project integrates Machine Learning with a full-stack Flask application and 
 
 ---
 
-##  Project Structure
+
 
