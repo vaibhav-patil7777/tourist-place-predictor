@@ -1,167 +1,85 @@
-from flask import Flask, render_template, request, redirect, session, url_for
-import pandas as pd
-import sqlite3
-import re
-from werkzeug.security import generate_password_hash, check_password_hash
-from sklearn.preprocessing import LabelEncoder
-from sklearn.neighbors import NearestNeighbors
+from flask import Flask, render_template, request, redirect, url_for
+from model_functions import predict_state_places
+import pickle
+from urllib.parse import urlencode
 
 app = Flask(__name__)
-app.secret_key = "tourism_secret_key"
 
-# ================= DATABASE =================
-def get_db():
-    return sqlite3.connect("users.db", timeout=10, check_same_thread=False)
+# Load dataset
+with open("tourism_df.pkl", "rb") as f:
+    df = pickle.load(f)
 
-def init_db():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        email TEXT UNIQUE,
-        password TEXT,
-        role TEXT DEFAULT 'user'
-    )
-    """)
-    conn.commit()
-    conn.close()
+# Dropdown options
+WEATHER_OPTIONS = ["Pleasant", "Warm", "Cool"]
+CROWD_OPTIONS = ["Low", "Medium", "High"]
+BUDGET_OPTIONS = ["Low", "Medium", "High"]
+FAMOUS_OPTIONS = sorted(df["Famous_For"].dropna().unique())
 
-init_db()
+@app.route("/", methods=["GET","POST"])
+def welcome():
+    return render_template("welcome.html")
 
-# ================= DATA + ML =================
-df = pd.read_csv("Indian_Tourism_ML_Big_Dataset.csv")
-
-encoders = {}
-for col in ["Weather", "Crowd_Level", "Tourism_Type", "Budget_Level"]:
-    le = LabelEncoder()
-    df[col] = le.fit_transform(df[col])
-    encoders[col] = le
-
-X = df[["Weather", "Crowd_Level", "Tourism_Type", "Budget_Level"]]
-model = NearestNeighbors(n_neighbors=5)
-model.fit(X)
-
-# ================= HOME =================
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-# ================= SIGNUP =================
-@app.route("/signup", methods=["GET", "POST"])
-def signup():
-    error = None
-    success = None
+@app.route("/dashboard", methods=["GET","POST"])
+def dashboard():
+    # Get query params
+    selected = {
+        "weather": request.args.get("weather",""),
+        "crowd": request.args.get("crowd",""),
+        "famous_for": request.args.get("famous_for",""),
+        "budget": request.args.get("budget","")
+    }
+    result = {}
 
     if request.method == "POST":
-        u = request.form["username"]
-        e = request.form["email"]
-        p = request.form["password"]
+        # Update selected from form
+        selected["weather"] = request.form.get("weather")
+        selected["crowd"] = request.form.get("crowd")
+        selected["famous_for"] = request.form.get("famous_for")
+        selected["budget"] = request.form.get("budget")
 
-        if not re.match(r"[^@]+@[^@]+\.[^@]+", e):
-            error = "Invalid email format"
-        else:
-            try:
-                conn = get_db()
-                c = conn.cursor()
-                c.execute(
-                    "INSERT INTO users(username,email,password) VALUES(?,?,?)",
-                    (u, e, generate_password_hash(p))
-                )
-                conn.commit()
-                conn.close()
-                success = "Account created successfully! Please login."
-            except sqlite3.IntegrityError:
-                error = " Username or Email already exists"
+        # Redirect with query params to preserve fields
+        query = urlencode(selected)
+        return redirect(url_for("dashboard")+"?"+query)
 
-    return render_template("signup.html", error=error, success=success)
+    # Predict only if all fields are selected
+    if all(selected.values()):
+        result = predict_state_places(df,
+                    weather=selected["weather"],
+                    crowd=selected["crowd"],
+                    famous_for=selected["famous_for"],
+                    budget=selected["budget"])
 
-# ================= LOGIN =================
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    error = None
+        if not result:
+            # No suggestions found
+            return render_template("no_result.html", selected=selected)
 
-    if request.method == "POST":
-        u = request.form["username"]
-        p = request.form["password"]
+    return render_template("dashboard.html",
+                           result=result,
+                           selected=selected,
+                           weather_options=WEATHER_OPTIONS,
+                           crowd_options=CROWD_OPTIONS,
+                           budget_options=BUDGET_OPTIONS,
+                           famous_options=FAMOUS_OPTIONS)
 
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE username=?", (u,))
-        user = c.fetchone()
-        conn.close()
+@app.route("/state/<state>")
+def state_page(state):
+    state = state.replace("%20"," ")  # decode spaces
 
-        if user and check_password_hash(user[3], p):
-            session["user"] = u
-            session["role"] = user[4]
-            return redirect("/")
-        else:
-            error = " Invalid login credentials"
+    # Preserve filters
+    selected = {
+        "weather": request.args.get("weather",""),
+        "crowd": request.args.get("crowd",""),
+        "famous_for": request.args.get("famous_for",""),
+        "budget": request.args.get("budget","")
+    }
 
-    return render_template("login.html", error=error)
+    result = predict_state_places(df)
+    places = result.get(state, [])
 
-# ================= LOGOUT =================
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
+    return render_template("state.html",
+                           state=state,
+                           places=places,
+                           selected=selected)
 
-# ================= ADMIN =================
-@app.route("/admin")
-def admin():
-    if session.get("role") != "admin":
-        return "Access Denied "
-
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT id, username, email, role FROM users")
-    users = c.fetchall()
-    conn.close()
-
-    return render_template("admin.html", users=users)
-
-# ================= CHATBOT =================
-@app.route("/chatbot", methods=["GET", "POST"])
-def chatbot():
-    reply = ""
-    if request.method == "POST":
-        msg = request.form["msg"].lower()
-        if "beach" in msg:
-            reply = "Goa, Varkala, Baga Beach are great beach destinations."
-        elif "hill" in msg:
-            reply = "Manali, Ooty, Munnar are famous hill stations."
-        elif "religious" in msg:
-            reply = "Varanasi, Tirupati, Amritsar are famous religious places."
-        else:
-            reply = "Ask about beach, hill or religious tourism."
-
-    return render_template("chatbot.html", reply=reply)
-
-# ================= RECOMMENDATION =================
-@app.route("/recommend", methods=["GET", "POST"])
-def recommend():
-    if request.method == "POST":
-        weather = encoders["Weather"].transform([request.form["weather"]])[0]
-        crowd = encoders["Crowd_Level"].transform([request.form["crowd"]])[0]
-        tourism = encoders["Tourism_Type"].transform([request.form["tourism"]])[0]
-        budget = encoders["Budget_Level"].transform([request.form["budget"]])[0]
-
-        distances, indices = model.kneighbors(
-            [[weather, crowd, tourism, budget]]
-        )
-
-        results = df.iloc[indices[0]][
-            ["State", "Place_Name", "Best_Time_To_Visit", "Famous_For"]
-        ]
-
-        return render_template(
-            "result.html",
-            places=results.to_dict(orient="records")
-        )
-
-    return render_template("recommend.html")
-
-# ================= RUN =================
-if __name__ == "__main__":
-    app.run(debug=True, threaded=False)
+if __name__=="__main__":
+    app.run(debug=True)

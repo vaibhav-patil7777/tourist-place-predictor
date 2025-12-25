@@ -1,16 +1,115 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-<h2>Welcome {{ session.user }}</h2>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tourism Dashboard</title>
+<style>
+/* ---------- General Reset ---------- */
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Poppins', sans-serif; }
 
-<ul>
-    <li><a href="/">Tourism Recommendation</a></li>
-    <li><a href="/chatbot">Tourism Chatbot</a></li>
-    <li><a href="/logout">Logout</a></li>
-</ul>
+/* ---------- Body ---------- */
+body { background:#f2f4f7; padding-top:120px; transition:background 0.3s; }
+
+/* ---------- Buttons ---------- */
+.btn {
+    padding:10px 16px; border-radius:8px; border:none; cursor:pointer;
+    font-weight:600; transition: all 0.3s ease; box-shadow:0 2px 8px rgba(0,0,0,0.15);
+}
+.predict { background:#28a745; color:#fff; }
+.predict:hover { background:#218838; transform: translateY(-2px); }
+.refresh { background:#ffc107; color:#333; }
+.refresh:hover { background:#e0a800; transform: translateY(-2px); }
+.choose {
+    background:#343a40; color:#fff; position: fixed; right:20px; top:20px; z-index:300;
+}
+.choose:hover { background:#23272b; transform: translateY(-2px); }
+
+/* ---------- Container & Cards ---------- */
+.container { max-width:1200px; margin:auto; padding:20px; }
+.card {
+    background:#fff; padding:15px; border-radius:10px; margin-bottom:20px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.1);
+}
+iframe { width:100%; height:220px; border:0; border-radius:10px; }
+
+/* ---------- Sidebar ---------- */
+#sidebar {
+    position: fixed; right:-350px; top:0; width:320px; height:100%;
+    background: rgba(0,0,0,0.65); overflow-y:auto; padding:20px;
+    z-index:250; color:white; transition:right 0.4s ease;
+}
+#sidebar.show { right:0; }
+#sidebar h3 { margin-bottom:15px; }
+#sidebar ul { list-style:none; margin-bottom:15px; }
+#sidebar li { margin-bottom:8px; }
+#sidebar a { color:white; text-decoration:none; transition:0.2s; }
+#sidebar a:hover { color:#00bfff; }
+
+/* ---------- Responsive ---------- */
+@media(max-width:1024px){ .nav-form{ justify-content:center; } }
+@media(max-width:768px){ select, .btn{ width:100%; text-align:center; } }
+@media(max-width:480px){ select, .btn{ font-size:14px; padding:8px; } }
+
+</style>
+</head>
+<body onclick="closeSidebar(event)">
+
+<!-- Include Navbar -->
+{% include 'navbar.html' %}
+
+<!-- Choose Place Button -->
+{% if result %}
+<button class="btn choose" onclick="toggleSidebar()">Choose Place</button>
+{% endif %}
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <h3>Suggested Places</h3><br>
+  {% for s,p in result.items() %}
+  <b>{{s}}</b>
+  <ul>
+    {% for pl in p %}
+    <li>
+      <a href="/state/{{s}}?weather={{selected.weather}}&crowd={{selected.crowd}}&famous_for={{selected.famous_for}}&budget={{selected.budget}}">
+        {{pl}}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endfor %}
+</div>
+
+<!-- Result Cards -->
+<div class="container">
+{% if not result %}<br><br><p>
+
+<h2 style="text-align:center;">No suggestions yet</h2></p>
+{% endif %}
+
+{% for state,places in result.items() %}<br><br>
+<div class="card">
+  <h3>{{state}}</h3>
+  <iframe src="https://www.google.com/maps?q={{state}}&output=embed"></iframe>
+  <a href="/state/{{state}}?weather={{selected.weather}}&crowd={{selected.crowd}}&famous_for={{selected.famous_for}}&budget={{selected.budget}}" style="color:#007bff;text-decoration:none;">See Places</a>
+</div>
+{% endfor %}
+</div>
+
+<script>
+// Sidebar toggle
+function toggleSidebar(){
+    document.getElementById("sidebar").classList.add('show');
+    document.body.style.overflow = "hidden";
+}
+
+// Close sidebar when clicking outside
+function closeSidebar(e){
+    if(!e.target.closest('#sidebar') && !e.target.closest('.choose')){
+        document.getElementById("sidebar").classList.remove('show');
+        document.body.style.overflow = "auto";
+    }
+}
+</script>
 </body>
 </html>
